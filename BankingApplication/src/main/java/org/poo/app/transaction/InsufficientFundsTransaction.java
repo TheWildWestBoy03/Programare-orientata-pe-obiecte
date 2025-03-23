@@ -36,4 +36,9 @@ public class InsufficientFundsTransaction implements Transaction {
     public String getTransactionType() {
         return "";
     }
+
+    @Override
+    public String getTransactionIBAN() {
+        return "";
+    }
 }

@@ -52,4 +52,9 @@ public class SendMoneyTransaction implements Transaction {
     public String getTransactionType() {
         return "SendMoneyTransaction";
     }
+
+    @Override
+    public String getTransactionIBAN() {
+        return senderIBAN;
+    }
 }

@@ -46,4 +46,9 @@ public class CardStateTransaction implements Transaction {
     public String getTransactionType() {
         return "CardStateTransaction";
     }
+
+    @Override
+    public String getTransactionIBAN() {
+        return IBAN;
+    }
 }

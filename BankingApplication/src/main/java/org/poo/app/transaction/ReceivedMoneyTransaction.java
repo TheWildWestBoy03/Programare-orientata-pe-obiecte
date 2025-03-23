@@ -52,4 +52,9 @@ public class ReceivedMoneyTransaction implements Transaction {
     public String getTransactionType() {
         return "ReceivedMoneyTransaction";
     }
+
+    @Override
+    public String getTransactionIBAN() {
+        return receiverIBAN;
+    }
 }

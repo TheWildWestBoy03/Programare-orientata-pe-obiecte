@@ -13,14 +13,16 @@ public class PayOnlineTransaction implements Transaction {
     private double amount;
     private String commerciant;
     private String currency;
+    private String IBAN;
 
-    public PayOnlineTransaction(Integer timestamp, String description, double amount,
+    public PayOnlineTransaction(String IBAN, Integer timestamp, String description, double amount,
                                     String commerciant, String currency) {
         this.timestamp = timestamp;
         this.description = description;
         this.amount = amount;
         this.commerciant = commerciant;
         this.currency = currency;
+        this.IBAN = IBAN;
     }
 
     @Override
@@ -43,5 +45,10 @@ public class PayOnlineTransaction implements Transaction {
     @Override
     public String getTransactionType() {
         return "PayOnlineTransaction";
+    }
+
+    @Override
+    public String getTransactionIBAN() {
+        return IBAN;
     }
 }

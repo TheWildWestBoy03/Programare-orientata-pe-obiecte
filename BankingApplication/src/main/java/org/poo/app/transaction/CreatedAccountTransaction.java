@@ -36,4 +36,9 @@ public class CreatedAccountTransaction implements Transaction {
     public String getTransactionType() {
         return "CreatedAccountTransaction";
     }
+
+    @Override
+    public String getTransactionIBAN() {
+        return "";
+    }
 }

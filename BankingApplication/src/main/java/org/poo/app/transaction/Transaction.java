@@ -8,4 +8,5 @@ public interface Transaction {
     public ObjectNode createTransactionObjectNode(ObjectMapper mapper);
     public Integer getTimestamp();
     public String getTransactionType();
+    public String getTransactionIBAN();
 }

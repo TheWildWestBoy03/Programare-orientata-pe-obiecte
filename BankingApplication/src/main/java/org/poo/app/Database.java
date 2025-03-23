@@ -207,9 +207,17 @@ public class Database {
             } else if (commandName.startsWith("splitPayment")) {
                 splitPayment(command);
             } else if (commandName.startsWith("addInterest")) {
-                addInterest(command);
+                ObjectNode result = addInterest(command);
+
+                if (result != null) {
+                    resultsArray.add(result);
+                }
             } else if (commandName.startsWith("changeInterestRate")) {
-                changeInterestRate(command);
+                ObjectNode result = changeInterestRate(command);
+
+                if (result != null) {
+                    resultsArray.add(result);
+                }
             } else if (commandName.startsWith("report")) {
                 ObjectNode result = report(command);
 
@@ -287,7 +295,7 @@ public class Database {
         for (User user : users) {
             if (user.getUserAcoountIdentification().startsWith(email)) {
                 for (Account account : user.getAccounts()) {
-                    if (account.getBalance() == 0) {
+                    if (account.getBalance() == 0 && account.getIBAN().equals(IBAN)) {
                         accountToDelete = account;
                         break;
                     }
@@ -296,6 +304,9 @@ public class Database {
                 if (accountToDelete != null) {
                     user.getAccounts().remove(accountToDelete);
                     break;
+                } else {
+                    user.getTransactions().add(new InsufficientFundsTransaction(command.getTimestamp(),
+                            "Account couldn't be deleted - there are funds remaining"));
                 }
             }
         }
@@ -338,20 +349,22 @@ public class Database {
         }
 
         if (newAccountCard != null) {
-            String cardNumber = Utils.generateCardNumber();
             if (commandName.equals("createCard")) {
                 ArrayList<Card> newCards = newAccountCard.getAccountCards();
-                newCards.add(new Card(cardNumber, "active", "normal"));
+                newCards.add(new Card(Utils.generateCardNumber(), "active", "normal"));
                 newAccountCard.setAccountCards(newCards);
             } else {
                 ArrayList<Card> newCards = newAccountCard.getAccountCards();
-                newCards.add(new OneTimeCard(cardNumber, "active", "oneTime"));
+                newCards.add(new OneTimeCard(Utils.generateCardNumber(), "active", "oneTime"));
                 newAccountCard.setAccountCards(newCards);
             }
 
+            if (command.getTimestamp() == 413) {
+                System.out.println("aici ba boule");
+            }
             requestingUser.getTransactions().add(new CardStateTransaction(command.getTimestamp(),
-                        "New card created", cardNumber, requestingUser.getUserAcoountIdentification(),
-                                                        accountIBAN));
+                        "New card created", newAccountCard.getAccountCards().getLast().getCardNumber(),
+                        requestingUser.getUserAcoountIdentification(), accountIBAN));
         }
     }
 
@@ -543,31 +556,21 @@ public class Database {
                         sourceUser.getTransactions().add(new InsufficientFundsTransaction(commandInput.getTimestamp(),
                                 "Insufficient funds"));
                     } else {
-                        sourceUser.getTransactions().add(new PayOnlineTransaction(commandInput.getTimestamp(), "Card payment", amount * rate,
+                        sourceUser.getTransactions().add(new PayOnlineTransaction(sourceAccount.getIBAN(), commandInput.getTimestamp(), "Card payment", amount * rate,
                                 commerciant, sourceAccount.getCurrency()));;
                         sourceAccount.setBalance(rest);
 
-                        ArrayList<CommerciantSummary> commerciants = sourceUser.retrieveCommerciants();
+                        if (card.getType().equals("oneTime")) {
+                            sourceAccount.getAccountCards().remove(card);
+                            user.getTransactions().add(new CardStateTransaction(timestanp, "The card has been destroyed",
+                                            cardNumber, email, sourceAccount.getIBAN()));
 
-                        CommerciantSummary correctCommerciant = null;
-                        for (CommerciantSummary commerciantSummary : commerciants) {
-                            if (commerciantSummary.getCommerciantName().equals(commerciant)) {
-                                commerciantSummary.setAmount(commerciantSummary.getAmount() + amount);
-                                correctCommerciant = commerciantSummary;
-                                break;
-                            }
+                            String newCardNumber = Utils.generateCardNumber();
+                            sourceAccount.getAccountCards().
+                                        add(new Card(newCardNumber, "active", "normal"));
+                            user.getTransactions().add(new CardStateTransaction(timestanp, "New card created",
+                                    newCardNumber, email, sourceAccount.getIBAN()));
                         }
-
-                        if (correctCommerciant == null) {
-                            correctCommerciant = new CommerciantSummary(commerciant, amount);
-                            commerciants.add(correctCommerciant);
-                        }
-
-                        commerciants = new ArrayList<>(commerciants.stream()
-                                .sorted(Comparator.comparing(CommerciantSummary::getCommerciantName))
-                                .toList());
-
-                        sourceUser.setCommerciants(commerciants);
 
                         if (sourceAccount.getBalance() <= sourceAccount.getMinBalance()) {
                             String attentionMessage = "You have reached the minimum amount of funds, the card will be frozen";
@@ -707,6 +710,8 @@ public class Database {
         }
 
         boolean notEnoughSupply = false;
+        Account accountNotEnoughSupply = null;
+
         for (Account account : impliedAccounts) {
             if (account == null) {
                 continue;
@@ -720,16 +725,26 @@ public class Database {
 
             if (rest < 0) {
                 notEnoughSupply = true;
-                break;
+                accountNotEnoughSupply = account;
             }
         }
 
         if (notEnoughSupply) {
+            ArrayList<String> recognizedUsers = new ArrayList<>();
             for (User user : impliedUsers) {
+                DecimalFormatSymbols symbols = new DecimalFormatSymbols();
+                symbols.setDecimalSeparator('.');
+                DecimalFormat df = new DecimalFormat("#.00", symbols);
+
                 if (user == null) {
                     continue;
                 }
-                user.getTransactions().add(new InsufficientFundsTransaction(timestamp, "Insufficient funds"));
+
+                //                    recognizedUsers.add(user.getUserLastName());
+
+                user.getTransactions().add(new SplitPaymentTransaction(timestamp, "Split payment of " + df.format(totalSum) + " " + paymentCurrency,
+                        paymentCurrency, totalSum / impliedUsers.size(), accounts, "no"
+                        , "Account " + accountNotEnoughSupply.getIBAN() + " has insufficient funds for a split payment."));
             }
         } else {
             for (Account account : impliedAccounts) {
@@ -747,37 +762,71 @@ public class Database {
                 DecimalFormat df = new DecimalFormat("#.00", symbols);
                 user.getTransactions().add(new SplitPaymentTransaction(timestamp,
                         "Split payment of " + df.format(totalSum) + " " + paymentCurrency, paymentCurrency,
-                        totalSum / impliedUsers.size(), accounts));
+                        totalSum / impliedUsers.size(), accounts, "yes", ""));
             }
         }
     }
 
-    public void addInterest(CommandInput commandInput) {
+    public ObjectNode addInterest(CommandInput commandInput) {
         String requestedIBAN = commandInput.getAccount();
         double newInterestRate = commandInput.getInterestRate();
 
         Account requestedAccount = getAccountByName(requestedIBAN);
         if (requestedAccount == null) {
-            return;
+            return null;
         }
 
-        if (requestedAccount.getType().equals("savings")) {
-            requestedAccount.setInterestRate(requestedAccount.getInterestRate() + newInterestRate);
+        ObjectNode newNode = mapper.createObjectNode();
+        newNode.put("command", commandInput.getCommand());
+
+        ObjectNode errorNode = mapper.createObjectNode();
+        if (requestedAccount.getType().compareTo("savings") != 0) {
+            errorNode.put("timestamp", commandInput.getTimestamp());
+            errorNode.put("description", "This is not a savings account");
+
+            newNode.put("output", errorNode);
+            newNode.put("timestamp", commandInput.getTimestamp());
+
+            return newNode;
         }
+
+        requestedAccount.setInterestRate(requestedAccount.getInterestRate() + newInterestRate);
+
+        return null;
     }
 
-    public void changeInterestRate(CommandInput commandInput) {
+    public ObjectNode changeInterestRate(CommandInput commandInput) {
         String requestedIBAN = commandInput.getAccount();
         double newInterestRate = commandInput.getInterestRate();
 
         Account requestedAccount = getAccountByName(requestedIBAN);
+        User requestedUser = getUserByIBAN(requestedIBAN);
+
         if (requestedAccount == null) {
-            return;
+            return null;
+        }
+
+        ObjectNode newNode = mapper.createObjectNode();
+        newNode.put("command", commandInput.getCommand());
+
+        ObjectNode errorNode = mapper.createObjectNode();
+        if (requestedAccount.getType().compareTo("savings") != 0) {
+            errorNode.put("timestamp", commandInput.getTimestamp());
+            errorNode.put("description", "This is not a savings account");
+
+            newNode.put("output", errorNode);
+            newNode.put("timestamp", commandInput.getTimestamp());
+
+            return newNode;
         }
 
         if (requestedAccount.getType().equals("savings")) {
             requestedAccount.setInterestRate(newInterestRate);
+            requestedUser.getTransactions().add(new InsufficientFundsTransaction(commandInput.getTimestamp(),
+                    "Interest rate of the account changed to " + newInterestRate));
         }
+
+        return null;
     }
 
     public ObjectNode report(CommandInput commandInput) {
@@ -803,10 +852,25 @@ public class Database {
 
             ArrayNode transactionsArray = mapper.createArrayNode();
 
+            int lastTimestamp = 0;
             for (Transaction transaction : requestedUser.getTransactions()) {
                 if (transaction.getTimestamp() >= startTimestamp && transaction.getTimestamp() <= endTimestamp) {
-                    transactionsArray.add(transaction.createTransactionObjectNode(mapper));
+                    if (transaction.getTransactionIBAN().isEmpty()) {
+                        if (transaction.getTransactionType().equals("SplitTransaction")) {
+                            if (lastTimestamp != transaction.getTimestamp()) {
+                                transactionsArray.add(transaction.createTransactionObjectNode(mapper));
+                            }
+                        } else {
+                            transactionsArray.add(transaction.createTransactionObjectNode(mapper));
+                        }
+                    } else {
+                        if (transaction.getTransactionIBAN().equals(requestedIBAN)) {
+                            transactionsArray.add(transaction.createTransactionObjectNode(mapper));
+                        }
+                    }
                 }
+
+                lastTimestamp = transaction.getTimestamp();
             }
 
             accountNode.put("transactions", transactionsArray);
@@ -840,7 +904,12 @@ public class Database {
         }
 
         if (!errorMessage.isEmpty()) {
-            resultNode.put("error", errorMessage);
+            if (errorMessage.startsWith("Account not found")) {
+                resultNode.put("timestamp", commandInput.getTimestamp());
+                resultNode.put("description", errorMessage);
+            } else {
+                resultNode.put("error", errorMessage);
+            }
         } else {
             // no errors found, normal spendingReport creation
             ArrayNode transactionsArray = mapper.createArrayNode();
@@ -850,23 +919,50 @@ public class Database {
 
             for (Transaction transaction : requestedUser.getTransactions()) {
                 if (transaction.getTimestamp() >= startTimestamp && transaction.getTimestamp() <= endTimestamp
-                                        && transaction.getTransactionType().startsWith("PayOnline")) {
+                                        && transaction.getTransactionType().startsWith("PayOnline")
+                                        && transaction.getTransactionIBAN().equals(requestedIBAN)) {
                     transactionsArray.add(transaction.createTransactionObjectNode(mapper));
                 }
             }
 
             resultNode.put("transactions", transactionsArray);
-            ArrayNode accountsArray = mapper.createArrayNode();
+            ArrayNode commerciantsArray = mapper.createArrayNode();
 
-            for (CommerciantSummary commerciantSummary : requestedUser.retrieveCommerciants()) {
-                ObjectNode commerciantNode = mapper.createObjectNode();
-                commerciantNode.put("commerciant", commerciantSummary.getCommerciantName());
-                commerciantNode.put("total", commerciantSummary.getAmount());
+            ArrayList<CommerciantSummary> commerciantSummaries = new ArrayList<>();
+            for (Transaction transaction : requestedUser.getTransactions()) {
+                if (transaction.getTimestamp() >= startTimestamp && transaction.getTimestamp() <= endTimestamp
+                        && transaction.getTransactionType().startsWith("PayOnline")
+                        && transaction.getTransactionIBAN().equals(requestedIBAN)) {
 
-                accountsArray.add(commerciantNode);
+                    String commerciant = ((PayOnlineTransaction) transaction).getCommerciant();
+                    boolean isCommerciantSaved = false;
+
+                    for (CommerciantSummary summary : commerciantSummaries) {
+                        if (summary.getCommerciantName().equals(commerciant)) {
+                            isCommerciantSaved = true;
+                            summary.setAmount(summary.getAmount() + ((PayOnlineTransaction)transaction).getAmount());
+                        }
+                    }
+
+                    if (!isCommerciantSaved) {
+                        commerciantSummaries.add(new CommerciantSummary(commerciant, ((PayOnlineTransaction)transaction).getAmount()));
+                    }
+                }
             }
 
-            resultNode.put("commerciants", accountsArray);
+            commerciantSummaries = new ArrayList<>(commerciantSummaries.stream()
+                    .sorted(Comparator.comparing(CommerciantSummary::getCommerciantName))
+                    .toList());
+
+            for (CommerciantSummary summary : commerciantSummaries) {
+                ObjectNode commerciantNode = mapper.createObjectNode();
+                commerciantNode.put("commerciant", summary.getCommerciantName());
+                commerciantNode.put("total", summary.getAmount());
+
+                commerciantsArray.add(commerciantNode);
+            }
+
+            resultNode.put("commerciants", commerciantsArray);
         }
 
         spendingReportObject.put("output", resultNode);

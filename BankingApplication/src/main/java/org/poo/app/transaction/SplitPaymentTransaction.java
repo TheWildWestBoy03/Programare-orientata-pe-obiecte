@@ -12,13 +12,17 @@ public class SplitPaymentTransaction implements Transaction {
     private final String currency;
     private final double amount;
     private final ArrayList<String> accounts;
-
-    public SplitPaymentTransaction(Integer timestamp, String description, String currency, double amount, ArrayList<String> accounts) {
+    private final String type;
+    private final String errorMessage;
+    public SplitPaymentTransaction(Integer timestamp, String description, String currency, double amount, ArrayList<String> accounts,
+                                   String type, String errorMessage) {
         this.timestamp = timestamp;
         this.description = description;
         this.currency = currency;
         this.amount = amount;
         this.accounts = accounts;
+        this.type = type;
+        this.errorMessage = errorMessage;
     }
 
     @Override
@@ -41,6 +45,9 @@ public class SplitPaymentTransaction implements Transaction {
         }
 
         transaction.put("involvedAccounts", accountsString);
+        if (type.equals("no")) {
+            transaction.put("error", errorMessage);
+        }
         return transaction;
     }
 
@@ -52,5 +59,10 @@ public class SplitPaymentTransaction implements Transaction {
     @Override
     public String getTransactionType() {
         return "SplitTransaction";
+    }
+
+    @Override
+    public String getTransactionIBAN() {
+        return "";
     }
 }
